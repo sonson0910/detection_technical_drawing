@@ -1,0 +1,22 @@
+# Models and weights
+*.pth
+*.pt
+*.onnx
+*.weights
+*.h5
+
+# Directories to ignore
+cv-assessment/models/
+cv-assessment/saved_models/
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+
+# IDEs and environments
+.vscode/
+.idea/
+venv/
+env/
+.venv/
