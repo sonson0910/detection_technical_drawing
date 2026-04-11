@@ -20,7 +20,7 @@ from src.detection.inference import (
     draw_detections,
     CLASS_NAMES,
 )
-from src.ocr.text_ocr import init_ocr_engine, ocr_note
+from src.ocr.note_ocr import init_ocr_engine, ocr_note
 from src.ocr.table_ocr import init_table_engine, ocr_table_ppstructure
 
 

@@ -159,6 +159,9 @@ def detect_note_regions(image_np, existing_boxes, existing_labels):
     kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 10))
     paragraph = cv2.morphologyEx(paragraph, cv2.MORPH_CLOSE, kernel_close)
     
+    # Enforce mask again to prevent morphological operations from bleeding into existing boxes
+    paragraph[covered_mask == 255] = 0
+    
     # Find contours of paragraph regions
     contours, _ = cv2.findContours(paragraph, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     

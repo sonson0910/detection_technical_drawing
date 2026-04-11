@@ -128,7 +128,7 @@ def create_demo():
             - **Note** — Annotations and text notes  
             - **Table** — Data tables with structure preservation
             
-            The system uses **Faster R-CNN** for object detection and **EasyOCR** for text recognition.
+            The system uses **Faster R-CNN** for object detection and **PaddleOCR** for text recognition.
             """
         )
 
@@ -194,6 +194,5 @@ if __name__ == "__main__":
     demo = create_demo()
     demo.launch(
         server_name="0.0.0.0",
-        server_port=7860,
         share=False,
     )
