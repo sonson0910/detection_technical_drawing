@@ -71,7 +71,6 @@ def post_process_detections(image_np, boxes, labels, scores,
 
     # Step 2.5: Same-class overlap resolution (e.g., adjacent PartDrawings)
     # Disabled: overlaps are natural in bounding boxes and trimming amputates drawing details (e.g., numbers/lines)
-    # boxes = _resolve_same_class_overlap(image_np, boxes, labels)
 
     # Step 3: Cross-class overlap resolution (only partial overlaps)
     # Re-enabled: Note should be trimmed when overlapping Table (PartDrawing is inherently protected)
@@ -224,70 +223,6 @@ def _tighten_boxes(image_np, boxes, labels):
     return np.array(refined_boxes) if refined_boxes else np.zeros((0, 4))
 
 
-def _tighten_partdrawing(roi, x1, y1, x2, y2, full_gray, img_h, img_w):
-    """Tighten PartDrawing box using structural line detection.
-
-    Engineering drawings typically have clear border lines separating sections.
-    We detect these strong horizontal/vertical lines to find precise boundaries.
-    """
-    bw = x2 - x1
-    bh = y2 - y1
-
-    # Use edge detection to find strong lines in the ROI
-    # Look for content boundaries by analyzing row/column projections
-    binary = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                    cv2.THRESH_BINARY_INV, 15, 8)
-
-    # Horizontal projection (sum along rows)
-    h_proj = np.sum(binary > 0, axis=1)
-    # Vertical projection (sum along columns)
-    v_proj = np.sum(binary > 0, axis=0)
-
-    # Find content boundaries (where ink density drops to near zero)
-    ink_threshold = bw * 0.02  # 2% of width = "has content"
-    ink_threshold_v = bh * 0.02  # 2% of height
-
-    # Find top boundary (first row with significant content)
-    top_offset = 0
-    for i in range(min(bh // 4, len(h_proj))):
-        if h_proj[i] > ink_threshold:
-            top_offset = max(0, i - 2)
-            break
-
-    # Find bottom boundary (last row with significant content)
-    bottom_offset = bh
-    for i in range(bh - 1, max(bh * 3 // 4, 0), -1):
-        if i < len(h_proj) and h_proj[i] > ink_threshold:
-            bottom_offset = min(bh, i + 3)
-            break
-
-    # Find left boundary
-    left_offset = 0
-    for i in range(min(bw // 4, len(v_proj))):
-        if v_proj[i] > ink_threshold_v:
-            left_offset = max(0, i - 2)
-            break
-
-    # Find right boundary
-    right_offset = bw
-    for i in range(bw - 1, max(bw * 3 // 4, 0), -1):
-        if i < len(v_proj) and v_proj[i] > ink_threshold_v:
-            right_offset = min(bw, i + 3)
-            break
-
-    # Don't over-tighten (max 10% reduction per side)
-    max_trim = 0.10
-    top_offset = min(top_offset, int(bh * max_trim))
-    left_offset = min(left_offset, int(bw * max_trim))
-    bottom_offset = max(bottom_offset, int(bh * (1 - max_trim)))
-    right_offset = max(right_offset, int(bw * (1 - max_trim)))
-
-    return [
-        x1 + left_offset,
-        y1 + top_offset,
-        x1 + right_offset,
-        y1 + bottom_offset,
-    ]
 
 
 def _tighten_note(roi, x1, y1, x2, y2):
@@ -384,149 +319,8 @@ def _tighten_table(roi, x1, y1, x2, y2):
 
 
 
-def _resolve_same_class_overlap(image_np, boxes, labels):
-    """Resolve overlaps between boxes of the SAME class (e.g., adjacent PartDrawings).
-
-    For overlapping same-class boxes, we find the structural dividing line
-    in the overlap region and split the boundary there. If no clear line
-    is found, we split at the midpoint of the overlap.
-    """
-    n = len(boxes)
-    refined_boxes = boxes.copy()
-    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            if labels[i] != labels[j]:
-                continue  # Only handle same-class overlaps
-
-            # Check overlap
-            ix1 = max(refined_boxes[i][0], refined_boxes[j][0])
-            iy1 = max(refined_boxes[i][1], refined_boxes[j][1])
-            ix2 = min(refined_boxes[i][2], refined_boxes[j][2])
-            iy2 = min(refined_boxes[i][3], refined_boxes[j][3])
-
-            if ix1 >= ix2 or iy1 >= iy2:
-                continue  # No overlap
-
-            overlap_w = ix2 - ix1
-            overlap_h = iy2 - iy1
-
-            area_i = (refined_boxes[i][2] - refined_boxes[i][0]) * (refined_boxes[i][3] - refined_boxes[i][1])
-            area_j = (refined_boxes[j][2] - refined_boxes[j][0]) * (refined_boxes[j][3] - refined_boxes[j][1])
-            inter_area = overlap_w * overlap_h
-
-            if inter_area / min(area_i, area_j) < 0.01:
-                continue  # Negligible overlap
-
-            # Determine overlap direction (horizontal or vertical adjacency)
-            if overlap_w > overlap_h:
-                # Horizontal overlap - boxes are arranged vertically
-                # Split horizontally (adjust y boundaries)
-                split_y = _find_structural_split(
-                    gray, int(ix1), int(iy1), int(ix2), int(iy2), direction='horizontal'
-                )
-
-                # Determine which box is on top
-                if refined_boxes[i][1] < refined_boxes[j][1]:
-                    top_idx, bottom_idx = i, j
-                else:
-                    top_idx, bottom_idx = j, i
-
-                # Top box: trim bottom to split line
-                refined_boxes[top_idx][3] = min(refined_boxes[top_idx][3], split_y)
-                # Bottom box: trim top to split line
-                refined_boxes[bottom_idx][1] = max(refined_boxes[bottom_idx][1], split_y)
-
-            else:
-                # Vertical overlap - boxes are arranged horizontally
-                # Split vertically (adjust x boundaries)
-                split_x = _find_structural_split(
-                    gray, int(ix1), int(iy1), int(ix2), int(iy2), direction='vertical'
-                )
-
-                # Determine which box is on the left
-                if refined_boxes[i][0] < refined_boxes[j][0]:
-                    left_idx, right_idx = i, j
-                else:
-                    left_idx, right_idx = j, i
-
-                # Left box: trim right to split line
-                refined_boxes[left_idx][2] = min(refined_boxes[left_idx][2], split_x)
-                # Right box: trim left to split line
-                refined_boxes[right_idx][0] = max(refined_boxes[right_idx][0], split_x)
-
-    return refined_boxes
 
 
-def _find_structural_split(gray, x1, y1, x2, y2, direction='horizontal'):
-    """Find the structural dividing line in the overlap region.
-
-    Looks for strong lines (drawing borders) in the overlap area.
-    Falls back to geometric midpoint if no clear line is found.
-
-    Args:
-        gray: Grayscale image
-        x1, y1, x2, y2: Overlap region coordinates
-        direction: 'horizontal' for y-split, 'vertical' for x-split
-
-    Returns:
-        Split coordinate (y for horizontal, x for vertical)
-    """
-    h, w = gray.shape[:2]
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w, x2), min(h, y2)
-
-    roi = gray[y1:y2, x1:x2]
-    if roi.size == 0:
-        if direction == 'horizontal':
-            return (y1 + y2) // 2
-        else:
-            return (x1 + x2) // 2
-
-    # Detect edges
-    binary = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                    cv2.THRESH_BINARY_INV, 15, 8)
-
-    if direction == 'horizontal':
-        # Look for strong horizontal lines
-        rw = x2 - x1
-        if rw < 5:
-            return (y1 + y2) // 2
-        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(10, rw // 2), 1))
-        lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
-        proj = np.sum(lines > 0, axis=1)
-
-        # Find strongest horizontal line position
-        threshold = rw * 0.4
-        line_positions = np.where(proj > threshold)[0]
-
-        if len(line_positions) > 0:
-            # Use the line closest to the center
-            center = (y2 - y1) // 2
-            closest = line_positions[np.argmin(np.abs(line_positions - center))]
-            return y1 + closest
-        else:
-            return (y1 + y2) // 2
-    else:
-        # Look for strong vertical lines
-        rh = y2 - y1
-        if rh < 5:
-            return (x1 + x2) // 2
-        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(10, rh // 2)))
-        lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel)
-        proj = np.sum(lines > 0, axis=0)
-
-        # Find strongest vertical line position
-        threshold = rh * 0.4
-        line_positions = np.where(proj > threshold)[0]
-
-        if len(line_positions) > 0:
-            center = (x2 - x1) // 2
-            closest = line_positions[np.argmin(np.abs(line_positions - center))]
-            return x1 + closest
-        else:
-            return (x1 + x2) // 2
 
 
 def _suppress_duplicate_regions(boxes, labels, scores, containment_thresh=0.7):
