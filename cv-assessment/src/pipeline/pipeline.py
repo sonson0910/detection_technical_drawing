@@ -20,6 +20,7 @@ from src.detection.inference import (
     draw_detections,
     CLASS_NAMES,
 )
+from src.detection.postprocess import post_process_detections
 from src.ocr.note_ocr import init_ocr_engine, ocr_note
 from src.ocr.table_ocr import init_table_engine, ocr_table_ppstructure
 
@@ -94,6 +95,18 @@ class EngineeringDrawingPipeline:
         all_boxes = np.array(all_boxes) if all_boxes else np.zeros((0, 4))
         all_labels = np.array(all_labels) if all_labels else np.zeros((0,), dtype=int)
         all_scores = np.array(all_scores) if all_scores else np.zeros((0,))
+
+        if len(all_boxes) == 0:
+            return (
+                {"image": image_name, "objects": []},
+                image_np,
+                [],
+            )
+
+        # Step 1c: Post-processing — tighten boxes, resolve overlaps, exclude footer
+        all_boxes, all_labels, all_scores = post_process_detections(
+            image_np, all_boxes, all_labels, all_scores
+        )
 
         if len(all_boxes) == 0:
             return (

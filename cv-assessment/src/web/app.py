@@ -25,7 +25,7 @@ def get_pipeline():
 
         model_path = os.environ.get(
             "MODEL_PATH",
-            os.path.join(os.path.dirname(__file__), "..", "..", "models", "best_model.pth"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "models", "best_map_model.pth"),
         )
         device = os.environ.get("DEVICE", "cuda")
         if not os.path.exists(model_path):

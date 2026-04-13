@@ -44,6 +44,58 @@ def preprocess_image(image_path):
     return image_tensor, image_np
 
 
+def _nms_prefer_larger(boxes, scores, iou_thresh=0.3):
+    """NMS that prefers larger boxes when one contains another.
+    
+    For Table class: when a small high-confidence box overlaps with a larger
+    low-confidence box, keep the larger one (because footer tables are often
+    detected as small fragments with higher conf AND as full boxes with lower conf).
+    """
+    if len(boxes) == 0:
+        return np.array([], dtype=int)
+    
+    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    order = scores.argsort()[::-1]  # Sort by confidence descending
+    
+    keep = []
+    suppressed = set()
+    
+    for idx in order:
+        if idx in suppressed:
+            continue
+        keep.append(idx)
+        
+        for jdx in order:
+            if jdx in suppressed or jdx == idx:
+                continue
+            
+            # Compute IoU
+            ix1 = max(boxes[idx][0], boxes[jdx][0])
+            iy1 = max(boxes[idx][1], boxes[jdx][1])
+            ix2 = min(boxes[idx][2], boxes[jdx][2])
+            iy2 = min(boxes[idx][3], boxes[jdx][3])
+            
+            if ix1 >= ix2 or iy1 >= iy2:
+                continue
+            
+            inter = (ix2 - ix1) * (iy2 - iy1)
+            iou = inter / (areas[idx] + areas[jdx] - inter)
+            
+            if iou > iou_thresh:
+                # Check containment: does the larger box contain the smaller one?
+                containment = inter / min(areas[idx], areas[jdx])
+                if containment > 0.7 and areas[jdx] > areas[idx]:
+                    # jdx is LARGER and overlaps heavily → swap: keep jdx, suppress idx
+                    keep[-1] = jdx  # Replace idx with jdx
+                    suppressed.add(idx)
+                    suppressed.add(jdx)  # Mark jdx as processed
+                    break
+                else:
+                    suppressed.add(jdx)
+    
+    return np.array(keep, dtype=int)
+
+
 def detect_objects(model, image_tensor, device, conf_threshold=0.5, nms_threshold=0.3):
     """Run detection with per-class confidence thresholds.
     
@@ -51,11 +103,11 @@ def detect_objects(model, image_tensor, device, conf_threshold=0.5, nms_threshol
     training data for Notes (only 41 annotations), while PartDrawing and Table
     use the normal threshold.
     """
-    # Per-class thresholds: Note gets much lower threshold
+    # Per-class thresholds (v2: retrained model detects Notes at 0.97+)
     CLASS_THRESHOLDS = {
         1: conf_threshold,        # PartDrawing - use normal threshold
-        2: 0.08,                  # Note - very low due to class imbalance
-        3: conf_threshold,        # Table - use normal threshold
+        2: max(0.3, conf_threshold * 0.6),  # Note - slightly lower than others
+        3: max(0.05, conf_threshold * 0.1), # Table - very low to catch small footer tables
     }
     
     with torch.no_grad():
@@ -80,18 +132,22 @@ def detect_objects(model, image_tensor, device, conf_threshold=0.5, nms_threshol
         if len(cls_boxes) == 0:
             continue
 
-        # NMS
-        keep_idx = cv2.dnn.NMSBoxes(
-            cls_boxes.tolist(),
-            cls_scores.tolist(),
-            cls_threshold,
-            nms_threshold,
-        )
-        if len(keep_idx) > 0:
-            keep_idx = keep_idx.flatten()
-            nms_boxes.extend(cls_boxes[keep_idx])
-            nms_labels.extend([cls_id] * len(keep_idx))
-            nms_scores.extend(cls_scores[keep_idx])
+        if cls_id == 3:  # Table: prefer-larger NMS
+            kept = _nms_prefer_larger(cls_boxes, cls_scores, nms_threshold)
+        else:
+            # Standard NMS
+            keep_idx = cv2.dnn.NMSBoxes(
+                cls_boxes.tolist(),
+                cls_scores.tolist(),
+                cls_threshold,
+                nms_threshold,
+            )
+            kept = keep_idx.flatten() if len(keep_idx) > 0 else []
+        
+        if len(kept) > 0:
+            nms_boxes.extend(cls_boxes[kept])
+            nms_labels.extend([cls_id] * len(kept))
+            nms_scores.extend(cls_scores[kept])
 
     # Post-processing: filter out tiny/invalid detections
     MIN_SIZE = {
@@ -140,6 +196,15 @@ def detect_note_regions(image_np, existing_boxes, existing_labels):
     binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                      cv2.THRESH_BINARY_INV, 15, 10)
     
+    # Step 0: Remove huge connected components (outer borders/document frames)
+    # that would merge with text during dilation and swallow note regions
+    num_labels_cc, labels_cc, stats_cc, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    for i in range(1, num_labels_cc):
+        comp_w = stats_cc[i, cv2.CC_STAT_WIDTH]
+        comp_h = stats_cc[i, cv2.CC_STAT_HEIGHT]
+        if comp_w > w * 0.5 or comp_h > h * 0.5:
+            binary[labels_cc == i] = 0
+    
     # Remove already-detected regions
     binary[covered_mask == 255] = 0
     
@@ -166,7 +231,7 @@ def detect_note_regions(image_np, existing_boxes, existing_labels):
     contours, _ = cv2.findContours(paragraph, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     note_boxes = []
-    min_note_area = h * w * 0.002   # At least 0.2% of image
+    min_note_area = h * w * 0.0008  # At least 0.08% of image (lowered to catch small notes)
     max_note_area = h * w * 0.35    # At most 35% of image
     
     for cnt in contours:
@@ -176,7 +241,7 @@ def detect_note_regions(image_np, existing_boxes, existing_labels):
         # Size filter
         if area < min_note_area or area > max_note_area:
             continue
-        if cw < 40 or ch < 20:
+        if cw < 30 or ch < 15:
             continue
         
         # Aspect ratio: Notes are typically wider than tall or roughly square
@@ -202,7 +267,7 @@ def detect_note_regions(image_np, existing_boxes, existing_labels):
             iy2 = min(y + ch, by2)
             if ix1 < ix2 and iy1 < iy2:
                 inter_area = (ix2 - ix1) * (iy2 - iy1)
-                if inter_area / area > 0.2:
+                if inter_area / area > 0.4:
                     overlap = True
                     break
         
@@ -297,21 +362,32 @@ def crop_objects(image_np, boxes, labels, scores, output_dir, image_name):
 
 def draw_detections(image_np, boxes, labels, scores):
     """Draw bounding boxes on image with class-specific colors."""
-    image_vis = image_np.copy()
+    # Dim the entire background for unselected regions
+    image_vis = cv2.addWeighted(image_np, 0.4, np.zeros_like(image_np), 0.6, 0)
 
+    # Restore the original bright pixels for regions that are inside bounding boxes
+    h, w = image_np.shape[:2]
+    for box in boxes:
+        x1, y1, x2, y2 = map(int, box)
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if y2 > y1 and x2 > x1:
+            image_vis[y1:y2, x1:x2] = image_np[y1:y2, x1:x2]
+
+    # Draw boxes and labels
     for box, label, score in zip(boxes, labels, scores):
         x1, y1, x2, y2 = map(int, box)
         class_name = CLASS_NAMES[label]
         color = CLASS_COLORS.get(class_name, (255, 255, 255))
 
-        # Draw box
-        cv2.rectangle(image_vis, (x1, y1), (x2, y2), color, 2)
+        # Draw box with thin line (1px)
+        cv2.rectangle(image_vis, (x1, y1), (x2, y2), color, 1)
 
-        # Draw label
+        # Draw label (also using thinner font)
         text = f"{class_name}: {score:.2f}"
-        text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-        cv2.rectangle(image_vis, (x1, y1 - text_size[1] - 10), (x1 + text_size[0], y1), color, -1)
-        cv2.putText(image_vis, text, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+        cv2.rectangle(image_vis, (x1, y1 - text_size[1] - 8), (x1 + text_size[0], y1), color, -1)
+        cv2.putText(image_vis, text, (x1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
     return image_vis
 
