@@ -12,6 +12,7 @@ An automated system for detecting and extracting objects from engineering drawin
 - [Training](#training)
 - [Inference](#inference)
 - [Web Demo](#web-demo)
+- [Deploy & Submission Assets](#deploy--submission-assets)
 - [Results & Experiments](#results--experiments)
 - [Approach & Methodology](#approach--methodology)
 - [Future Improvements](#future-improvements)
@@ -196,17 +197,19 @@ python src/web/app.py
 ```
 Opens at `http://localhost:7860`
 
-### Deploy to HuggingFace Spaces
-```bash
-# See deployment instructions in the Spaces documentation
-```
-
 ### Features
 1. **Upload Zone**: Drag-and-drop or click to upload engineering drawings
 2. **Confidence Slider**: Adjust detection confidence threshold
 3. **Visualization**: Bounding boxes with class-specific colors
 4. **JSON Panel**: Complete detection results in JSON format
 5. **OCR Panel**: Extracted text from Note and Table regions
+
+## 📦 Deploy & Submission Assets
+
+> **LƯU Ý CHO ỨNG VIÊN**: Hãy điền các link dưới đây trước khi nộp bài cho nhà tuyển dụng theo yêu cầu mục 6 của `cv_assessment.md`.
+
+* **🔗 Web Demo URL:** `[ĐIỀN LINK HUGGINGFACE SPACES / VERCEL VÀO ĐÂY]`
+* **🏋️ Model Weights Link:** `[ĐIỀN LINK GOOGLE DRIVE / HUGGINGFACE HUB CỦA FILE \`best_model.pth\` VÀO ĐÂY]`
 
 ## 📊 Results & Experiments
 
@@ -238,13 +241,14 @@ Opens at `http://localhost:7860`
 ### Detection Strategy
 1. **Transfer Learning**: Start from COCO pre-trained Faster R-CNN
 2. **Fine-tuning**: Train all layers on engineering drawing dataset
-3. **Post-processing**: Class-specific NMS with tuned thresholds
+3. **Hybrid Detection for 'Note'**: Use morphological operations + connected components as a complement to Faster R-CNN to accurately locate small/scattered text features.
+4. **Post-processing**: Class-specific NMS with tuned thresholds
 
 ### OCR Strategy
 1. **Note regions**: Direct OCR with PaddleOCR (angle-aware)
 2. **Table regions**: Two-pass approach:
-   - Primary: PPStructure for structure-aware recognition
-   - Fallback: Y-coordinate clustering for row grouping
+   - Primary: PPStructure for structure-aware recognition (preserves rows/columns/alignments to satisfy requirements).
+   - Fallback: Y-coordinate clustering for row grouping.
 
 ### Key Design Decisions
 - **No YOLO**: Per requirements, using commercially-licensed alternatives
