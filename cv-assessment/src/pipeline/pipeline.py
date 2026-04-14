@@ -7,6 +7,7 @@ import sys
 import json
 import yaml
 import numpy as np
+import torch
 from PIL import Image
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -28,7 +29,9 @@ class EngineeringDrawingPipeline:
     """Complete pipeline for engineering drawing analysis."""
 
     def __init__(self, model_path, device="cuda", conf_threshold=0.5,
-                 ocr_lang="en", use_gpu=True):
+                 ocr_lang="en", use_gpu=None):
+        if use_gpu is None:
+            use_gpu = (device == "cuda")
         print("Loading detection model...")
         self.model = load_model(model_path, device=device)
         self.device = device
@@ -58,22 +61,9 @@ class EngineeringDrawingPipeline:
             self.model, image_tensor, self.device, self.conf_threshold
         )
 
-        # Step 1b: Post-processing — tighten boxes, resolve overlaps, exclude footer
-        # We only use model detections, removing the hybrid rule-based heuristic
-        all_boxes = boxes
-        all_labels = labels
-        all_scores = scores
-
-        if len(all_boxes) == 0:
-            return (
-                {"image": image_name, "objects": []},
-                image_np,
-                [],
-            )
-
-        # Step 1c: Post-processing — tighten boxes, resolve overlaps, exclude footer
+        # Step 2: Post-processing — NMS, resolve overlaps, and refinement
         all_boxes, all_labels, all_scores = post_process_detections(
-            image_np, all_boxes, all_labels, all_scores
+            image_np, boxes, labels, scores
         )
 
         if len(all_boxes) == 0:
@@ -133,7 +123,7 @@ class EngineeringDrawingPipeline:
 
         json_result = {"image": image_name, "objects": objects}
 
-        # Step 5: Draw visualization (includes hybrid Note detections)
+        # Step 5: Draw visualization
         vis_image = draw_detections(image_np, all_boxes, all_labels, all_scores)
 
         # Step 6: Save outputs
@@ -188,7 +178,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="Input image or directory")
     parser.add_argument("--output", default="outputs", help="Output directory")
     parser.add_argument("--confidence", type=float, default=0.5)
-    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
     pipeline = EngineeringDrawingPipeline(

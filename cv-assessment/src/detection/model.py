@@ -3,7 +3,6 @@ Faster R-CNN Model for Engineering Drawing Detection.
 Uses torchvision pre-trained Faster R-CNN with ResNet-50 FPN v2 backbone.
 
 CV Expert optimizations:
-- Custom anchor aspect ratios for Note class (wide, thin text blocks)
 - Higher detections_per_img for engineering drawings with many objects
 - Tuned score/nms thresholds for better recall
 """
@@ -34,8 +33,6 @@ def get_model(num_classes=4, pretrained=True, min_size=1200, max_size=2000):
             min_size=min_size,
             max_size=max_size
         )
-
-    # (Reverted custom Anchor Generator because best_map_model_backup.pth uses default Anchors)
 
     # 2. Replace the classifier head for our number of classes
     in_features = model.roi_heads.box_predictor.cls_score.in_features

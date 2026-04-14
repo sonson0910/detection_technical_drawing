@@ -10,8 +10,8 @@ from PIL import Image
 def init_ocr_engine(lang="vi", use_gpu=True):
     """Initialize PaddleOCR engine."""
     from paddleocr import PaddleOCR
-    # Use English and Vietnamese if mixed, typically passing 'vi' handles both well in PaddleOCR
-    reader = PaddleOCR(use_angle_cls=True, lang=lang, use_gpu=use_gpu, show_log=False)
+    # Let paddle auto-detect GPU/CPU to avoid Unknown argument error
+    reader = PaddleOCR(use_angle_cls=True, lang=lang)
     return reader
 
 

@@ -27,7 +27,8 @@ def get_pipeline():
             "MODEL_PATH",
             os.path.join(os.path.dirname(__file__), "..", "..", "models", "best_map_model_backup.pth"),
         )
-        device = os.environ.get("DEVICE", "cuda")
+        import torch
+        device = os.environ.get("DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
         if not os.path.exists(model_path):
             raise FileNotFoundError(
                 f"Model not found at {model_path}. "

@@ -7,13 +7,13 @@ import os
 import numpy as np
 from PIL import Image
 import cv2
+import re
 
 
 def init_table_engine(use_gpu=True):
     """Initialize PPStructure engine."""
     from paddleocr import PPStructure
-    # Use English and Vietnamese if mixed
-    table_engine = PPStructure(show_log=False, use_gpu=use_gpu, lang='en')
+    table_engine = PPStructure(lang='en')
     return table_engine
 
 
@@ -36,15 +36,10 @@ def ocr_table_ppstructure(table_engine, image_input):
     """
     if isinstance(image_input, str):
         image = cv2.imread(image_input)
-        if image is not None:
-            pass # Keep BGR for cv2 logic if needed, but PPStructure expects numpy array
     elif isinstance(image_input, Image.Image):
-        # PIL to cv2 format directly
         image = cv2.cvtColor(np.array(image_input), cv2.COLOR_RGB2BGR)
     else:
-        # Check if RGB, standard models expect BGR in cv2, but paddle handles BGR by default if passed as cv2 image
         if image_input.shape[-1] == 3:
-            # Assume it was passed as RGB from inference.py
             image = cv2.cvtColor(image_input, cv2.COLOR_RGB2BGR)
         else:
             image = image_input
@@ -59,15 +54,14 @@ def ocr_table_ppstructure(table_engine, image_input):
         return {"type": "table", "rows": [], "html": "", "raw_text": ""}
 
     html = ""
-    # Find the table result, if any. PPStructure might classify parts as text or figure.
-    # If it classifies as table, we get res['res']['html'].
+    # Find the table result from PPStructure
     for region in results:
         if region['type'] == 'table':
             res = region['res']
             html = res.get('html', '')
             break
 
-    # If no table found by PPStructure, fallback to standard text grouping using PaddleOCR results
+    # Fallback to standard text grouping using PaddleOCR results if no HTML found
     if not html:
         text_items = []
         for region in results:
@@ -123,11 +117,7 @@ def ocr_table_ppstructure(table_engine, image_input):
             "raw_text": raw_text,
         }
 
-    # If HTML was found directly by Table structure:
-    # We can try to parse rows out of HTML for standard representation or leave it. 
-    # For now, just store raw text as the combined HTML without tags.
-    import re
-    # Remove tags to form raw text
+    # Parse raw text without html tags
     clean_text = re.sub('<[^<]+>', ' | ', html).replace('|  |', '|').strip(' |')
     
     return {
