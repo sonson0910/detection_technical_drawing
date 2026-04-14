@@ -538,3 +538,5 @@ def _filter_invalid_boxes(boxes, labels, scores, img_h, img_w):
         np.array(valid_labels) if valid_labels else np.zeros((0,), dtype=int),
         np.array(valid_scores) if valid_scores else np.zeros((0,)),
     )
+
+

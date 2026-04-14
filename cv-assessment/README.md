@@ -206,8 +206,6 @@ Opens at `http://localhost:7860`
 
 ## 📦 Deploy & Submission Assets
 
-> **LƯU Ý CHO ỨNG VIÊN**: Hãy điền các link dưới đây trước khi nộp bài cho nhà tuyển dụng theo yêu cầu mục 6 của `cv_assessment.md`.
-
 * **🔗 Web Demo URL:** `[ĐIỀN LINK HUGGINGFACE SPACES / VERCEL VÀO ĐÂY]`
 * **🏋️ Model Weights Link:** `[ĐIỀN LINK GOOGLE DRIVE / HUGGINGFACE HUB CỦA FILE \`best_model.pth\` VÀO ĐÂY]`
 

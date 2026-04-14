@@ -12,8 +12,8 @@ dataset:
 model:
   backbone: "resnet50"
   pretrained: true
-  min_size: 800
-  max_size: 1333
+  min_size: 1200
+  max_size: 2000
 
 training:
   batch_size: 2

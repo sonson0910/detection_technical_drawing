@@ -10,10 +10,10 @@ CV Expert optimizations:
 import torchvision
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
-from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.models.detection.rpn import AnchorGenerator, RPNHead
 
 
-def get_model(num_classes=4, pretrained=True):
+def get_model(num_classes=4, pretrained=True, min_size=1200, max_size=2000):
     """
     Build Faster R-CNN model with ResNet-50 FPN v2 backbone.
     Optimized for engineering drawing objects:
@@ -23,19 +23,27 @@ def get_model(num_classes=4, pretrained=True):
     """
     if pretrained:
         weights = torchvision.models.detection.FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT
-        model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=weights)
+        model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(
+            weights=weights,
+            min_size=min_size,
+            max_size=max_size
+        )
     else:
-        model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=None)
+        model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(
+            weights=None,
+            min_size=min_size,
+            max_size=max_size
+        )
 
-    # Replace the classifier head for our number of classes
+    # (Reverted custom Anchor Generator because best_map_model_backup.pth uses default Anchors)
+
+    # 2. Replace the classifier head for our number of classes
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
 
-    # Increase detections per image (engineering drawings can have many objects)
-    model.roi_heads.detections_per_img = 100
-    # Lower score threshold during training to catch more candidates
+    # 3. Tuning Hyperparameters
+    model.roi_heads.detections_per_img = 150  # Lots of objects in engineering drawings
     model.roi_heads.score_thresh = 0.05
-    # Higher NMS thresh to keep more candidates for post-processing
-    model.roi_heads.nms_thresh = 0.5
+    model.roi_heads.nms_thresh = 0.45  # Reduce overlapping boxes
 
     return model

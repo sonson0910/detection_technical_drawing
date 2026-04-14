@@ -15,7 +15,6 @@ from src.detection.inference import (
     load_model,
     preprocess_image,
     detect_objects,
-    detect_note_regions,
     crop_objects,
     draw_detections,
     CLASS_NAMES,
@@ -59,42 +58,11 @@ class EngineeringDrawingPipeline:
             self.model, image_tensor, self.device, self.conf_threshold
         )
 
-        # Step 1b: Hybrid Note Detection (morphological analysis)
-        # Only pass non-Note model detections as "covered" areas
-        non_note_mask = labels != 2
-        non_note_boxes = boxes[non_note_mask] if len(boxes) > 0 else np.zeros((0, 4))
-        non_note_labels = labels[non_note_mask] if len(labels) > 0 else np.zeros((0,), dtype=int)
-        note_boxes = detect_note_regions(image_np, non_note_boxes, non_note_labels)
-        
-        # Merge Note detections into results (avoid duplicating model-detected Notes)
-        model_note_mask = labels == 2
-        model_note_boxes = boxes[model_note_mask] if np.any(model_note_mask) else np.zeros((0, 4))
-        
-        all_boxes = list(boxes)
-        all_labels = list(labels)
-        all_scores = list(scores)
-        for nb in note_boxes:
-            # Check if hybrid Note overlaps with any model-detected Note
-            is_duplicate = False
-            for mnb in model_note_boxes:
-                ix1 = max(nb[0], mnb[0])
-                iy1 = max(nb[1], mnb[1])
-                ix2 = min(nb[2], mnb[2])
-                iy2 = min(nb[3], mnb[3])
-                if ix1 < ix2 and iy1 < iy2:
-                    inter = (ix2-ix1) * (iy2-iy1)
-                    nb_area = (nb[2]-nb[0]) * (nb[3]-nb[1])
-                    if inter / nb_area > 0.3:
-                        is_duplicate = True
-                        break
-            if not is_duplicate:
-                all_boxes.append(np.array(nb, dtype=float))
-                all_labels.append(2)       # Note = class 2
-                all_scores.append(0.85)    # Rule-based confidence
-        
-        all_boxes = np.array(all_boxes) if all_boxes else np.zeros((0, 4))
-        all_labels = np.array(all_labels) if all_labels else np.zeros((0,), dtype=int)
-        all_scores = np.array(all_scores) if all_scores else np.zeros((0,))
+        # Step 1b: Post-processing — tighten boxes, resolve overlaps, exclude footer
+        # We only use model detections, removing the hybrid rule-based heuristic
+        all_boxes = boxes
+        all_labels = labels
+        all_scores = scores
 
         if len(all_boxes) == 0:
             return (
